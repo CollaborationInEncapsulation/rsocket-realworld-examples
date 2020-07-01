@@ -1,6 +1,6 @@
 letter:
   receiver:
-    base-url: http://localhost:8081/
+    service-name: big-bro-service
   processing:
     time: 0
     random-delay: 0
@@ -16,3 +16,8 @@ spring:
   application:
     order: 0
     name: pechkin-service
+  cloud:
+    consul:
+      discovery:
+        instance-group: pechkin-service
+        service-name: pechkin-service

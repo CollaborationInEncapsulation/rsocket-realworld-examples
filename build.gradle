@@ -41,6 +41,7 @@ subprojects {
          platform('org.junit:junit-bom:5.4.0'),
          platform('io.projectreactor:reactor-bom:2020.0.4'),
          platform('io.github.resilience4j:resilience4j-bom:1.7.0'),
+         platform('org.springframework.cloud:spring-cloud-dependencies:2020.0.1')
         ].each {
             implementation it
             annotationProcessor it

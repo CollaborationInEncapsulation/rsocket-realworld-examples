@@ -49,7 +49,7 @@ public class AdjustmentProperties {
 
 	@Data
 	public static class ReceiverProperties {
-
+		private String serviceName;
 		private String baseUrl;
 	}
 }

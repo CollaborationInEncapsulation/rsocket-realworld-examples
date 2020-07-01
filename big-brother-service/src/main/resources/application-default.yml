@@ -1,6 +1,6 @@
 letter:
   receiver:
-    base-url: http://localhost:8082/
+    service-name: agent-smith-service
   processing:
     time: 500
     random-delay: 0
@@ -15,3 +15,8 @@ spring:
   application:
     order: 1
     name: big-bro-service
+  cloud:
+    consul:
+      discovery:
+        instance-group: big-bro-service
+        service-name: big-bro-service

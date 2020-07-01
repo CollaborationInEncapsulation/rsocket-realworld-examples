@@ -1,6 +1,6 @@
 letter:
   receiver:
-    base-url: http://localhost:8080/
+    service-name: pechkin-service
   processing:
     time: 2000
     random-delay: 1000
@@ -15,3 +15,8 @@ spring:
   application:
     order: 2
     name: agent-smith-service
+  cloud:
+    consul:
+      discovery:
+        instance-group: agent-smith-service
+        service-name: agent-smith-service

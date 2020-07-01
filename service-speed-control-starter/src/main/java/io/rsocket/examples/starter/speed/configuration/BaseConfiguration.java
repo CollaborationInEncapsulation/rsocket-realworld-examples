@@ -2,6 +2,7 @@ package io.rsocket.examples.starter.speed.configuration;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -22,7 +23,11 @@ import io.rsocket.examples.common.control.WaitFreeInstrumentedPool;
 import io.rsocket.examples.common.control.Worker;
 import io.rsocket.examples.common.processing.Delayer;
 import io.rsocket.examples.starter.speed.AdjustmentProperties;
+import io.rsocket.loadbalance.LoadbalanceTarget;
+import io.rsocket.loadbalance.RoundRobinLoadbalanceStrategy;
+import io.rsocket.transport.netty.client.WebsocketClientTransport;
 import lombok.extern.slf4j.Slf4j;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.pool.InstrumentedPool;
 import reactor.pool.PoolBuilder;
@@ -31,6 +36,7 @@ import reactor.util.retry.Retry;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.rsocket.server.RSocketServerCustomizer;
+import org.springframework.cloud.client.discovery.ReactiveDiscoveryClient;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.messaging.rsocket.RSocketRequester;
@@ -46,9 +52,23 @@ import org.springframework.messaging.rsocket.RSocketRequester;
 public class BaseConfiguration {
 
 	@Bean
-	public RSocketRequester rSocketRequester(RSocketRequester.Builder rsocketRequesterBuilder,
+	Flux<List<LoadbalanceTarget>> transportsViaServiceDiscovery(ReactiveDiscoveryClient discoveryClient,
 			AdjustmentProperties adjustmentProperties) {
+		return Flux
+			.interval(Duration.ZERO, Duration.ofMillis(1000))
+			.onBackpressureDrop()
+			.concatMap(__ ->
+				discoveryClient
+					.getInstances(adjustmentProperties.getReceiver().getServiceName())
+					.map(si -> LoadbalanceTarget.from(si.getInstanceId(),
+							WebsocketClientTransport.create(URI.create("ws://" + si.getHost() + ":" + si.getPort() + "/rsocket"))))
+					.collectList(),
+		1
+			);
+	}
 
+	@Bean
+	public RSocketRequester rSocketRequester(RSocketRequester.Builder rsocketRequesterBuilder, Flux<List<LoadbalanceTarget>> transportsViaServiceDiscovery) {
 		return rsocketRequesterBuilder
 			.rsocketConnector(connector ->
 				connector
@@ -58,7 +78,7 @@ public class BaseConfiguration {
 						     .maxBackoff(Duration.ofSeconds(5))
 					)
 			)
-			.websocket(URI.create(adjustmentProperties.getReceiver().getBaseUrl() + "rsocket"));
+			.transports(transportsViaServiceDiscovery, new RoundRobinLoadbalanceStrategy());
 	}
 
 	@Bean
