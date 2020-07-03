@@ -1,31 +1,22 @@
 package io.rsocket.examples.starter.speed.configuration;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import com.hazelcast.config.Config;
 import com.hazelcast.core.HazelcastInstance;
-import com.hazelcast.map.IMap;
-import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Bucket;
-import io.github.bucket4j.Bucket4j;
-import io.github.bucket4j.grid.GridBucketState;
-import io.github.bucket4j.grid.RecoveryStrategy;
-import io.github.bucket4j.grid.hazelcast.Hazelcast;
-import io.github.resilience4j.ratelimiter.RateLimiter;
-import io.github.resilience4j.ratelimiter.RateLimiterConfig;
-import io.github.resilience4j.reactor.ratelimiter.operator.RateLimiterOperator;
+import com.netflix.concurrency.limits.limit.VegasLimit;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
-import io.rsocket.examples.common.control.DistributedConcurrencyLimitedWorker;
+import io.rsocket.core.LeaseConfig;
 import io.rsocket.examples.common.control.ErrorStrategy;
+import io.rsocket.examples.common.control.LeaseManager;
+import io.rsocket.examples.common.control.LimitBasedLeaseSender;
 import io.rsocket.examples.common.control.OverflowStrategy;
-import io.rsocket.examples.common.control.RateLimitedWorker;
 import io.rsocket.examples.common.control.SimpleWorker;
 import io.rsocket.examples.common.control.WaitFreeInstrumentedPool;
 import io.rsocket.examples.common.control.Worker;
@@ -38,12 +29,11 @@ import reactor.pool.PoolBuilder;
 import reactor.util.retry.Retry;
 
 import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.autoconfigure.hazelcast.HazelcastInstanceFactory;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.boot.rsocket.server.RSocketServerCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.messaging.rsocket.RSocketRequester;
 
 /**
  * @author Evgeny Borisov
@@ -56,48 +46,47 @@ import org.springframework.web.reactive.function.client.WebClient;
 public class BaseConfiguration {
 
 	@Bean
-	public WebClient webClient(WebClient.Builder webClientBuilder, AdjustmentProperties adjustmentProperties) {
-		return webClientBuilder.baseUrl(adjustmentProperties.getReceiver().getBaseUrl())
-		                       .build();
+	public RSocketRequester rSocketRequester(RSocketRequester.Builder rsocketRequesterBuilder,
+			AdjustmentProperties adjustmentProperties) {
+
+		return rsocketRequesterBuilder
+			.rsocketConnector(connector ->
+				connector
+					.lease(LeaseConfig::deferOnNoLease)
+					.reconnect(
+						Retry.backoff(Long.MAX_VALUE, Duration.ofMillis(100))
+						     .maxBackoff(Duration.ofSeconds(5))
+					)
+			)
+			.websocket(URI.create(adjustmentProperties.getReceiver().getBaseUrl() + "rsocket"));
 	}
 
 	@Bean
-	@ConditionalOnProperty(value = "letter.sender.rate-limit.distributed", havingValue = "true")
-	public HazelcastInstance hazelcastInstance() {
-		Config config = new Config();
+	public RSocketServerCustomizer rSocketServerCustomizer(AdjustmentProperties properties, LeaseManager leaseManager) {
+		return rSocketServer -> rSocketServer
+				.lease((config) -> {
+					final LimitBasedLeaseSender senderAndStatsCollector =
+							new LimitBasedLeaseSender(
+									UUID.randomUUID().toString(),
+									leaseManager,
+									VegasLimit.newBuilder()
+									          .initialLimit(properties.getProcessing().getConcurrencyLevel())
+									          .maxConcurrency(properties.getProcessing().getQueueSize())
+									          .build());
+					config.sender(senderAndStatsCollector)
+					      .statsCollector(senderAndStatsCollector);
+				});
+	}
 
-		return new HazelcastInstanceFactory(config).getHazelcastInstance();
+	@Bean
+	public LeaseManager leaseManager(AdjustmentProperties properties) {
+		AdjustmentProperties.ProcessingProperties processingProperties =
+				properties.getProcessing();
+		return new LeaseManager(processingProperties.getConcurrencyLevel(), (int) processingProperties.getTime());
 	}
 
 	@Bean
 	public Supplier<Worker> rateLimitedWorker(AdjustmentProperties adjustmentProperties, Optional<HazelcastInstance> hazelcastInstanceOptional) {
-		AdjustmentProperties.RateLimitProperties rateLimitConfigurations = adjustmentProperties.getSender().getRateLimit();
-		if (rateLimitConfigurations.isEnabled()) {
-
-			if (rateLimitConfigurations.isDistributed()) {
-				HazelcastInstance instance = hazelcastInstanceOptional.get();
-				IMap<String, GridBucketState> buckets = instance.getMap("buckets");
-				Bucket bucket = Bucket4j.extension(Hazelcast.class)
-				                        .builder()
-				                        .addLimit(Bandwidth.simple(rateLimitConfigurations.getLimit(), rateLimitConfigurations.getPeriod()))
-				                        .build(buckets, "bigbro", RecoveryStrategy.RECONSTRUCT);
-
-				ScheduledExecutorService scheduledExecutorService =
-						Executors.newScheduledThreadPool(rateLimitConfigurations.getLimit());
-				return () -> new DistributedConcurrencyLimitedWorker(bucket, scheduledExecutorService);
-			}
-			else {
-				RateLimiterConfig rateLimiterConfig = RateLimiterConfig
-						.custom()
-						.limitForPeriod(rateLimitConfigurations.getLimit())
-						.limitRefreshPeriod(rateLimitConfigurations.getPeriod())
-						.build();
-				RateLimiter rateLimiter = RateLimiter.of("workerLimiter", rateLimiterConfig);
-
-				return () -> new RateLimitedWorker(RateLimiterOperator.of(rateLimiter));
-			}
-		}
-
 		return SimpleWorker::new;
 	}
 

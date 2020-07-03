@@ -10,3 +10,7 @@ spring:
   devtools:
     livereload:
       enabled: false
+  rsocket:
+    server:
+      transport: websocket
+      mapping-path: /rsocket

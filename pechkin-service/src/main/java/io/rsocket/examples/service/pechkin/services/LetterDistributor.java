@@ -13,9 +13,8 @@ import reactor.pool.InstrumentedPool;
 
 import org.springframework.beans.factory.DisposableBean;
 import org.springframework.beans.factory.InitializingBean;
+import org.springframework.messaging.rsocket.RSocketRequester;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
 
 /**
  * @author Evgeny Borisov
@@ -28,7 +27,7 @@ public class LetterDistributor extends BaseSubscriber<Void>
 		implements InitializingBean, DisposableBean {
 
 	final LetterProducer                   producer;
-	final WebClient                        webClient;
+	final RSocketRequester                 rSocketRequester;
 	final InstrumentedPool<Worker>         pool;
 	final Function<Mono<Void>, Mono<Void>> responseHandlerFunction;
 
@@ -39,13 +38,12 @@ public class LetterDistributor extends BaseSubscriber<Void>
 	                                             .getMaxPendingAcquireSize();
 		producer.letterFlux()
 		        .flatMap(letter -> pool
-			        .withPoolable(worker -> worker.execute(() -> webClient
-				        .post()
-				        .uri("/analyse/letter")
-				        .body(BodyInserters.fromValue(letter))
-				        .retrieve()
-				        .bodyToMono(Void.class)
-				        .transform(responseHandlerFunction)
+			        .withPoolable(worker -> worker.execute(() ->
+				        rSocketRequester
+					        .route("analyse.letter")
+					        .data(letter)
+					        .send()
+					        .transform(responseHandlerFunction)
 			        )),
 			        concurrency
 		        )

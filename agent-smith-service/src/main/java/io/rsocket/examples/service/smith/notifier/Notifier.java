@@ -5,24 +5,22 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import org.springframework.messaging.rsocket.RSocketRequester;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class Notifier {
 
-	final WebClient webClient;
+	final RSocketRequester rSocketRequester;
 
 	public Mono<Void> sendNotification(Notification notification) {
-		return webClient.post()
-		                .uri("/letter-status")
-		                .body(BodyInserters.fromValue(notification))
-		                .retrieve()
-		                .bodyToMono(Void.class)
-		                .doOnSuccess(__ -> log.info("Guard notification sent"))
-		                .doOnError(e -> log.error("no sender url found", e));
+		return rSocketRequester
+                .route("letter-status")
+                .data(notification)
+                .send()
+                .doOnSuccess(__ -> log.info("Guard notification sent"))
+                .doOnError(e -> log.error("no sender url found", e));
 	}
 }

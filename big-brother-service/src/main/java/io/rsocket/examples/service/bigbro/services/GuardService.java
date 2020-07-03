@@ -10,9 +10,8 @@ import lombok.experimental.Accessors;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+import org.springframework.messaging.rsocket.RSocketRequester;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.BodyInserters;
-import org.springframework.web.reactive.function.client.WebClient;
 
 @Slf4j
 @Service
@@ -20,19 +19,17 @@ import org.springframework.web.reactive.function.client.WebClient;
 public class GuardService {
 
 	final Function<Mono<Void>, Mono<Void>> responseHandlerFunction;
-	final WebClient                        webClient;
+	final RSocketRequester                 rSocketRequester;
 
 	public Mono<Void> send(DecodedLetter decodedLetter) {
 		GuardRequest request = new GuardRequest().setLetterId(decodedLetter.getAuthor())
 		                                         .setMessage(decodedLetter.getContent());
 
-		return webClient
-			.post()
-			.uri("/guard")
-			.body(BodyInserters.fromValue(request))
-			.retrieve()
-			.bodyToMono(Void.class)
-			.transform(responseHandlerFunction);
+		return rSocketRequester
+				.route("guard")
+				.data(request)
+				.send()
+				.transform(responseHandlerFunction);
 	}
 
 	@Data

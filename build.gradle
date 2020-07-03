@@ -36,7 +36,7 @@ subprojects {
 
     dependencies {
         [
-         enforcedPlatform('io.rsocket:rsocket-bom:1.1.1-SNAPSHOT'),
+         enforcedPlatform('io.rsocket:rsocket-bom:1.1.1-enhancement/lease-changes-SNAPSHOT'),
          enforcedPlatform('org.springframework.boot:spring-boot-dependencies:2.4.3'),
          platform('org.junit:junit-bom:5.4.0'),
          platform('io.projectreactor:reactor-bom:2020.0.4'),
